@@ -4,6 +4,7 @@ import { findReference, FindReferenceError } from '@solana/pay';
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { InfinitySpin } from "react-loader-spinner";
 import IPFSDownload from "./IpfsDownload";
+import { addOrder, hasPurchased, fetchItem } from "../lib/api";
 
 const STATUS = {
     Initial: "Initial",
@@ -16,7 +17,7 @@ export default function Buy({ itemID }) {
     const { publicKey, sendTransaction } = useWallet();
     const orderID = useMemo(() => Keypair.generate().publicKey, []); //Public key used to identify the order
 
-    // const [paid, setPaid] = useState(null);
+    const [item, setItem] = useState(null); //IPFS hash & filename of the purchased item
     const [loading, setLoading] = useState(false); // Loading state of all above
     const [status, setStatus] = useState(STATUS.Initial); //Tracking transaction status
 
@@ -51,7 +52,9 @@ export default function Buy({ itemID }) {
         try {
             //Send the transaction to the network
             const txHash = await sendTransaction(tx, connection);
-            console.log(`Transaction send: https://solscan.io/tx/${txHash}?cluster=devnet`);
+            console.log(
+                `Transaction send: https://solscan.io/tx/${txHash}?cluster=devnet`
+                );
             //This may fail. We'll set it to true for now. 
             setStatus(STATUS.Submitted);
         }   catch (error) {
@@ -61,6 +64,22 @@ export default function Buy({ itemID }) {
         }
     };
 
+    useEffect (() => {
+        // Check if this address has already purchased this item
+        // If so, fetch the item and set paid to true
+        // Async function to avoid blocking the UI
+        async function checkPurchased() {
+            const purchased = await hasPurchased(publicKey, itemID);
+            if (purchased) {
+                setStatus(STATUS.Paid);
+                const item = await fetchItem(itemID);
+                setItem(item);
+                console.log("Address has already purchased this item!");
+            }
+        }
+        checkPurchased();
+    }, [publicKey, itemID]);
+
     useEffect(() => {
         //Check if transaction was confirmed
         if (status === STATUS.Submitted) {
@@ -69,10 +88,14 @@ export default function Buy({ itemID }) {
                 try {
                     const result = await findReference(connection, orderID);
                     console.log("Finding tx reference", result.confirmationStatus);
-                    if (result.confirmationStatus === "confirmed" || result.confirmationStatus === "finalized") {
+                    if (
+                        result.confirmationStatus === "confirmed" || 
+                        result.confirmationStatus === "finalized"
+                    ) {
                         clearInterval(interval);
                         setStatus(STATUS.Paid);
                         setLoading(false);
+                        addOrder(order);
                         alert("Thank you for your purchase!");
                     }
                 } catch (e) {
@@ -87,6 +110,15 @@ export default function Buy({ itemID }) {
             return () => {
                 clearInterval(interval);
             };
+        }
+
+        async function getItem(itemID) {
+            const item = await fetchItem(itemID);
+            setItem(item);
+        }
+
+        if (status === STATUS.Paid) {
+            getItem(itemID);
         }
     }, [status]);
 
@@ -104,10 +136,17 @@ export default function Buy({ itemID }) {
 
     return (
         <div>
-            {paid ? (
-                <IPFSDownload filename="emoji" hash="Qmd3WKNdEJrQSENocRynAYpEr9dgAAy6Lq5BkUPB1e2oYh" cta="Download emojis"/>
+            {status === STATUS.Paid ? (
+                <IPFSDownload 
+                filename="emoji" 
+                hash="Qmd3WKNdEJrQSENocRynAYpEr9dgAAy6Lq5BkUPB1e2oYh" 
+                cta="Download emojis"
+                />
             ) : (
-                <button disabled={loading} className="buy-button" onClick={processTransaction}>
+                <button
+                 disabled={loading} 
+                 className="buy-button" 
+                 onClick={processTransaction}>
                     Buy now 🠚
                 </button>
             
